@@ -35,16 +35,16 @@ railway/*.json     config-as-code for the 4 Railway services
 
 ## Deploy to Railway
 
-1. Push this repo to GitHub.
-2. In Railway, create a project with **Postgres** and **Redis**.
-3. Add 4 services from the repo. Set each service's *Config file path*:
-   - `api`: `railway/api.json`; generate a public domain.
-   - `worker`: `railway/worker.json`.
-   - `marketer`: `railway/marketer.json` (cron `0 2,3 * * *` UTC; the code only runs at 03:xx London).
-   - `web`: `railway/web.json`; generate a public domain.
-4. Set the variables from `.env.example` on api, worker and marketer (use shared variables). Set `NEXT_PUBLIC_API_URL` and `API_INTERNAL_URL` on web.
-5. Run once: `railway run -s api npm run stripe:bootstrap`. This creates the 8 products and their prices plus the webhook, and prints `STRIPE_WEBHOOK_SECRET`. Set that secret on the api service.
-6. Run a test purchase with card `4242 4242 4242 4242`.
+The project fits Railway's free plan: **Postgres, Redis, `api`, `web`**. The `api` service also runs the background worker and schedules the 03:00 London marketing run (`RUN_WORKER=true`, `MARKETING_SCHEDULER=queue`). On a paid plan you can split them out into separate `worker` and `marketer` services: set `RUN_WORKER=false` and `MARKETING_SCHEDULER=cron`, and use the start commands `start:worker` and `start:marketer`.
+
+| Service | Build command | Start command |
+| --- | --- | --- |
+| api | `npm ci && npm run build -w @vs/catalog && npm run build -w @vs/api` | `npm run start -w @vs/api` (healthcheck `/health`) |
+| web | `npm ci && npm run build -w @vs/catalog && npm run build -w @vs/web` | `npm run start -w @vs/web` |
+
+`JWT_SECRET` and `ENCRYPTION_KEY` are generated on first boot and stored in Postgres if you don't set them yourself. Stripe setup is a one-off: run `railway run -s api npm run stripe:bootstrap`, then set the `STRIPE_WEBHOOK_SECRET` it prints.
+
+**Railway's free plan limits:** the per-client Metabase, Paperless-ngx and Invoice Ninja services need the Hobby plan, so don't sell KPI Dashboards, Digital Archive or AR Recovery until you've upgraded.
 
 ## Marketing autopilot (03:00–04:00 Europe/London, unattended)
 
