@@ -21,7 +21,7 @@ export default function BuyButton({ slug, label, oneOff, secondary }: { slug: st
         body: JSON.stringify({ oneOff: !!oneOff, ...attribution() }),
       });
       const j = await res.json();
-      if (!res.ok || !j.url) throw new Error(j.message ?? 'Checkout is not available right now.');
+      if (!res.ok || !j.url) throw new Error(j.message ?? 'Checkout is not available right now. Please try again in a few minutes.');
       window.location.href = j.url;
     } catch (e: any) {
       setError(e.message);
@@ -30,7 +30,7 @@ export default function BuyButton({ slug, label, oneOff, secondary }: { slug: st
   }
   return (
     <>
-      <button className={`btn${secondary ? ' secondary' : ''}`} onClick={go} disabled={busy}>{busy ? 'Opening checkout…' : label}</button>
+      <button className={`btn${secondary ? ' secondary' : ''}`} aria-busy={busy} onClick={go} disabled={busy}>{busy ? 'Opening secure checkout…' : label}</button>
       {error && <p className="notice" style={{ marginTop: 10 }}>{error}</p>}
     </>
   );
