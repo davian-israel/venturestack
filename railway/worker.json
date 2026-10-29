@@ -1,0 +1,5 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "buildCommand": "npm ci && npm run build -w @vs/catalog && npm run build -w @vs/api" },
+  "deploy": { "startCommand": "npm run start:worker -w @vs/api", "restartPolicyType": "ALWAYS" }
+}

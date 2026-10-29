@@ -1,0 +1,9 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "buildCommand": "npm ci && npm run build -w @vs/catalog && npm run build -w @vs/api" },
+  "deploy": {
+    "startCommand": "npm run start:marketer -w @vs/api",
+    "cronSchedule": "0 2,3 * * *",
+    "restartPolicyType": "NEVER"
+  }
+}

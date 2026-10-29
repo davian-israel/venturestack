@@ -1,0 +1,10 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "buildCommand": "npm ci && npm run build -w @vs/catalog && npm run build -w @vs/api" },
+  "deploy": {
+    "startCommand": "npm run start -w @vs/api",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}

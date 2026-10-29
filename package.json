@@ -1,0 +1,11 @@
+{
+  "name": "venturestack",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "build": "npm run build -w @vs/catalog && npm run build -w @vs/api && npm run build -w @vs/web",
+    "test": "npm test -w @vs/api",
+    "stripe:bootstrap": "npm run stripe:bootstrap -w @vs/api"
+  },
+  "engines": { "node": ">=22" }
+}
