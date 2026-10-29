@@ -2,6 +2,12 @@
 import { useState } from 'react';
 import { API } from '@/lib/api';
 
+/** Carries the prospect ref and channel from the landing URL into Stripe metadata for attribution. */
+function attribution() {
+  const q = new URLSearchParams(window.location.search);
+  return { ref: q.get('ref') ?? undefined, source: q.get('utm_source') ?? undefined };
+}
+
 export default function BuyButton({ slug, label, oneOff, secondary }: { slug: string; label: string; oneOff?: boolean; secondary?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +18,7 @@ export default function BuyButton({ slug, label, oneOff, secondary }: { slug: st
       const res = await fetch(`${API}/checkout/${slug}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oneOff: !!oneOff }),
+        body: JSON.stringify({ oneOff: !!oneOff, ...attribution() }),
       });
       const j = await res.json();
       if (!res.ok || !j.url) throw new Error(j.message ?? 'Checkout is not available right now.');

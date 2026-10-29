@@ -15,6 +15,10 @@ async function main() {
   // Re-sync per-client schedules every hour (and now), so new/cancelled subscriptions take effect.
   await fulfilQueue().upsertJobScheduler('schedule-all', { every: 3_600_000 }, { name: 'schedule-all', data: { type: 'schedule-all' } });
   await fulfilQueue().add('schedule-all', { type: 'schedule-all' });
+  // Daily MRR snapshot for trend charts, and the weekly growth review (Monday 05:00 London, after the 03:00 marketing run).
+  await fulfilQueue().upsertJobScheduler('snapshot', { pattern: '5 0 * * *', tz: 'Europe/London' }, { name: 'snapshot', data: { type: 'snapshot' } });
+  await fulfilQueue().upsertJobScheduler('optimise', { pattern: '0 5 * * 1', tz: 'Europe/London' }, { name: 'optimise', data: { type: 'optimise' } });
+  await fulfilQueue().add('snapshot', { type: 'snapshot' });
   console.log('worker ready');
 
   const shutdown = async () => {

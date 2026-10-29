@@ -34,6 +34,12 @@ export interface Product {
   consentGate?: 'voice-consent' | 'audit-authorization' | 'data-processing';
   /** Launch order; lower ships first. */
   wave: number;
+  /** Paying clients targeted (from the video's scale plan). */
+  targetClients: number;
+  /** One-off sales per month targeted (Security Audit only). */
+  targetOneOffPerMonth?: number;
+  /** Estimated variable delivery cost per client per month, in cents, excluding AI tokens (measured separately): hosting, GPU, SaaS seats. */
+  estCostPerClientCents: number;
 }
 
 export const PRODUCTS: Product[] = [
@@ -55,6 +61,8 @@ export const PRODUCTS: Product[] = [
     ],
     consentGate: 'data-processing',
     wave: 1,
+    targetClients: 10,
+    estCostPerClientCents: 1000,
   },
   {
     slug: 'security-audit',
@@ -75,6 +83,9 @@ export const PRODUCTS: Product[] = [
     ],
     consentGate: 'audit-authorization',
     wave: 2,
+    targetClients: 5,
+    estCostPerClientCents: 500,
+    targetOneOffPerMonth: 4,
   },
   {
     slug: 'voice-studio',
@@ -90,6 +101,8 @@ export const PRODUCTS: Product[] = [
     deliverables: ['Up to 8 dubbed videos per month', 'Spanish subtitles', 'Upload and scheduling to your Spanish channel'],
     consentGate: 'voice-consent',
     wave: 3,
+    targetClients: 6,
+    estCostPerClientCents: 3000,
   },
   {
     slug: 'sales-dept',
@@ -105,6 +118,8 @@ export const PRODUCTS: Product[] = [
     deliverables: ['Custom Claude skills pack for your playbook', 'Call-prep briefs before every meeting', 'Monday pipeline summary'],
     consentGate: 'data-processing',
     wave: 2,
+    targetClients: 4,
+    estCostPerClientCents: 500,
   },
   {
     slug: 'kpi-dashboards',
@@ -121,6 +136,8 @@ export const PRODUCTS: Product[] = [
     perClientService: { template: 'metabase', image: 'metabase/metabase:latest', port: 3000 },
     consentGate: 'data-processing',
     wave: 3,
+    targetClients: 5,
+    estCostPerClientCents: 2000,
   },
   {
     slug: 'digital-archive',
@@ -137,6 +154,8 @@ export const PRODUCTS: Product[] = [
     perClientService: { template: 'paperless-ngx', image: 'ghcr.io/paperless-ngx/paperless-ngx:latest', port: 8000 },
     consentGate: 'data-processing',
     wave: 3,
+    targetClients: 6,
+    estCostPerClientCents: 1500,
   },
   {
     slug: 'ar-recovery',
@@ -153,6 +172,8 @@ export const PRODUCTS: Product[] = [
     perClientService: { template: 'invoiceninja', image: 'invoiceninja/invoiceninja:5', port: 80 },
     consentGate: 'data-processing',
     wave: 2,
+    targetClients: 8,
+    estCostPerClientCents: 1000,
   },
   {
     slug: 'offline-attribution',
@@ -168,6 +189,8 @@ export const PRODUCTS: Product[] = [
     deliverables: ['Unique QR codes and short links per placement', 'Monthly ROI report by channel'],
     consentGate: 'data-processing',
     wave: 2,
+    targetClients: 10,
+    estCostPerClientCents: 500,
   },
 ];
 
@@ -175,3 +198,7 @@ export const bySlug = (slug: string): Product | undefined => PRODUCTS.find((p) =
 
 export const usd = (cents: number): string =>
   `$${(cents / 100).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+
+/** Monthly revenue target: recurring at target clients + targeted one-off sales. $26,100 at the video's scale plan. */
+export const targetMonthlyRevenueCents = (products: Product[] = PRODUCTS): number =>
+  products.reduce((sum, p) => sum + p.targetClients * p.monthlyCents + (p.targetOneOffPerMonth ?? 0) * (p.oneOffCents ?? 0), 0);

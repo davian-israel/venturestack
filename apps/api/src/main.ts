@@ -6,10 +6,11 @@ import { migrate } from './db/migrate';
 import { BillingService } from './billing/billing.service';
 import { EntitlementGuard, SessionGuard } from './auth/auth';
 import { PortalController, PublicController } from './http/controllers';
+import { AdminAuthController, AdminController, AdminGuard } from './http/admin.controller';
 
 @Module({
-  controllers: [PublicController, PortalController],
-  providers: [BillingService, SessionGuard, EntitlementGuard],
+  controllers: [PublicController, PortalController, AdminAuthController, AdminController],
+  providers: [BillingService, SessionGuard, EntitlementGuard, AdminGuard],
 })
 class AppModule {}
 

@@ -69,8 +69,36 @@ The marketer enrols leads during the 03:00 hour. Instantly sends during the camp
 - Agent Reach uses official APIs only (Reddit, YouTube Data, HN). It never scrapes LinkedIn or X.
 - Voice cloning requires signed consent. Security audits read code only, from a token the client grants.
 
+## Business dashboard (`/admin`, owner only)
+
+You sign in with a link emailed to `OWNER_EMAIL`. The page refreshes every 5 minutes and shows:
+
+- **Run-rate revenue vs the $26,100/mo target**: recurring MRR plus one-off audits from the last 30 days, the same basis the video's target uses. It also shows a pace badge, and how many new clients a week you need compared with how many you're getting.
+- **Headline numbers:** MRR, cash collected this month, profit (run-rate and month-to-date), margin, paying clients, sign-ups and churn.
+- **Charts:** MRR over time against target (from daily snapshots) and cash collected per week. Both have hover tooltips and a data table.
+- **Per-product profit and loss:** clients against target, MRR, 30-day revenue, cost and profit, plus outreach status with pause and resume.
+- **Campaign funnel per product:** prospects found → proof built → emailed → opened → proof-page visits → checkout started → paid, plus replies, bounces and unsubscribes.
+- **Costs:** measured AI and prospecting costs, estimated Stripe fees and hosting, and your fixed tools.
+- **Subject-line A/B tests**, the **weekly review log**, **03:00 run history**, **settings** and **connections**.
+
+Sales are attributed end to end: the proof page link carries `?ref=` into Stripe metadata, so a sale is credited to the prospect and campaign that produced it.
+
+## Weekly optimiser (Monday 05:00 London)
+
+It reviews the last 28 days and **changes automatically, within hard limits**:
+
+- the daily send cap, by ±10 a week (between 10 and `MARKETING_SEND_CAP_CEILING`)
+- how sends are split between products, weighted by replies and wins with a 10% floor each
+- pausing a product whose bounce rate is over 5% or unsubscribe rate over 3%
+- unlocking the next wave of products once the current wave reaches 50% of its client target
+- subject-line tests: a loser is retired only at statistical significance (z ≥ 1.64, ≥ 80 sends each), and an AI-written challenger replaces it
+
+**It never changes prices, offers, client claims or the sending guardrails.** Those come to you as recommendations, along with alerts for products losing money, reply rates under 1%, and pace warnings.
+
+Every change and recommendation is logged on the dashboard and emailed to you as the weekly review.
+
 ## Tests
 
 ```
-npm test                    # unit tests: paywall rules, consent gates, send guardrails, 03:00 window, AR aging
+npm test                    # 22 unit tests: paywall, consent gates, send guardrails, 03:00 window, AR aging, optimiser rules, pacing
 ```

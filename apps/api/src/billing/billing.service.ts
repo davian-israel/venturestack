@@ -6,13 +6,14 @@ import { one, q } from '../db/db';
 import { enqueue } from '../jobs/queue';
 import { stripe } from './stripe.client';
 import { fromStripeStatus, graceUntil, lookupKey } from './entitlement-rules';
+import { stripeFeeCents } from '../growth/costs';
 
 @Injectable()
 export class BillingService {
   private readonly log = new Logger(BillingService.name);
 
   /** Creates a Stripe Checkout session: setup fee + monthly subscription in one payment. */
-  async createCheckout(productSlug: string, opts: { email?: string; oneOff?: boolean }) {
+  async createCheckout(productSlug: string, opts: { email?: string; oneOff?: boolean; ref?: string; source?: string }) {
     const product = bySlug(productSlug);
     if (!product) throw new NotFoundException('Unknown product');
     if (opts.oneOff && !product.oneOffCents) throw new BadRequestException('No one-off option for this product');
@@ -29,7 +30,9 @@ export class BillingService {
       throw new BadRequestException('Stripe prices missing — run `npm run stripe:bootstrap`.');
     }
 
-    const metadata = { product_slug: product.slug };
+    const ref = opts.ref && /^[\w-]{4,40}$/.test(opts.ref) ? opts.ref : '';
+    const source = opts.source && /^[\w.-]{1,40}$/.test(opts.source) ? opts.source : '';
+    const metadata = { product_slug: product.slug, ref, source };
     const session = await s.checkout.sessions.create({
       mode: opts.oneOff ? 'payment' : 'subscription',
       line_items: prices.data.map((p) => ({ price: p.id, quantity: 1 })),
@@ -44,6 +47,7 @@ export class BillingService {
       success_url: `${config.PUBLIC_WEB_URL}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${config.PUBLIC_WEB_URL}/p/${product.slug}?cancelled=1`,
     });
+    await q(`INSERT INTO funnel_events (type, product_slug, ref, source) VALUES ('checkout_started',$1,$2,$3)`, [product.slug, ref || null, source || null]);
     return { url: session.url };
   }
 
@@ -139,13 +143,22 @@ export class BillingService {
     const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id ?? null;
 
     await q(
-      `INSERT INTO entitlements (tenant_id, product_slug, status, stripe_subscription_id)
-       VALUES ($1,$2,$3,$4)
+      `INSERT INTO entitlements (tenant_id, product_slug, status, stripe_subscription_id, source_ref)
+       VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (tenant_id, product_slug) DO UPDATE
          SET status=EXCLUDED.status, stripe_subscription_id=COALESCE(EXCLUDED.stripe_subscription_id, entitlements.stripe_subscription_id),
-             grace_until=NULL, updated_at=now()`,
-      [tenantId, slug, session.mode === 'payment' ? 'one_off' : 'active', subId],
+             grace_until=NULL, canceled_at=NULL, updated_at=now(), source_ref=COALESCE(entitlements.source_ref, EXCLUDED.source_ref)`,
+      [tenantId, slug, session.mode === 'payment' ? 'one_off' : 'active', subId, session.metadata?.ref || null],
     );
+    const ref = session.metadata?.ref || null;
+    await q(`INSERT INTO funnel_events (type, product_slug, ref, source) VALUES ('checkout_completed',$1,$2,$3)`, [slug, ref, session.metadata?.source || null]);
+    if (ref) await q(`UPDATE prospects SET status='won', won_at=now() WHERE proof_slug=$1`, [ref]);
+    if (session.mode === 'payment' && session.amount_total) {
+      await q(
+        `INSERT INTO payments (id, tenant_id, product_slug, amount_cents, fee_cents_est, kind) VALUES ($1,$2,$3,$4,$5,'one_off') ON CONFLICT DO NOTHING`,
+        [session.id, tenantId, slug, session.amount_total, stripeFeeCents(session.amount_total)],
+      );
+    }
     await enqueue({ type: 'welcome', tenantId, productSlug: slug }, { jobId: `welcome__${session.id}` });
     await enqueue({ type: 'provision', tenantId, productSlug: slug }, { jobId: `provision__${tenantId}__${slug}` });
   }
@@ -161,6 +174,7 @@ export class BillingService {
 
     const rows = await q<{ tenant_id: string }>(
       `UPDATE entitlements SET status=$2, current_period_end=to_timestamp($3), updated_at=now(),
+              canceled_at = CASE WHEN $2 = 'canceled' THEN COALESCE(canceled_at, now()) ELSE NULL END,
               grace_until = CASE WHEN $2 = 'past_due' THEN COALESCE(grace_until, now() + make_interval(days => $4)) ELSE NULL END
        WHERE stripe_subscription_id=$1 RETURNING tenant_id`,
       [sub.id, status, periodEnd ?? null, config.PAST_DUE_GRACE_DAYS],
@@ -191,6 +205,14 @@ export class BillingService {
   private async onInvoicePaid(inv: Stripe.Invoice) {
     const subId = this.subscriptionIdOf(inv);
     if (!subId) return;
+    const ent = await one<{ tenant_id: string; product_slug: string }>('SELECT tenant_id, product_slug FROM entitlements WHERE stripe_subscription_id=$1', [subId]);
+    const amount = (inv as unknown as { amount_paid?: number }).amount_paid ?? 0;
+    if (amount > 0 && inv.id) {
+      await q(
+        `INSERT INTO payments (id, tenant_id, product_slug, amount_cents, fee_cents_est, kind) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+        [inv.id, ent?.tenant_id ?? null, ent?.product_slug ?? null, amount, stripeFeeCents(amount), inv.billing_reason === 'subscription_create' ? 'first' : 'recurring'],
+      );
+    }
     const rows = await q<{ tenant_id: string; product_slug: string; was: string }>(
       `UPDATE entitlements e SET status='active', grace_until=NULL, updated_at=now()
        FROM (SELECT id, status AS was FROM entitlements WHERE stripe_subscription_id=$1) old

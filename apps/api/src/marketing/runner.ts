@@ -10,6 +10,8 @@ import { findProspects, Prospect } from './prospecting';
 import { applyClaimsToggle, footer, sequenceFor } from './sequences';
 import { assertFilled, blockReason, fill, inRunWindow } from './guardrails';
 import { campaignFor, postToLinkedIn, postToX, pushToInstantly } from './channels';
+import { GrowthSettings, getSettings } from '../growth/settings';
+import { recordCost, withCostContext } from '../growth/costs';
 
 interface Stats {
   [k: string]: number | string[] | undefined;
@@ -32,10 +34,26 @@ class Clock {
 const bump = (s: Stats, k: string, n = 1) => (s[k] = ((s[k] as number) ?? 0) + n);
 const err = (s: Stats, msg: string) => (s.errors ??= []).push(msg.slice(0, 300));
 
-/** Products being promoted. MARKETING_MAX_WAVE=1 → Agent Reach only (the video's advice); 3 → all 8. */
-export function activeProducts(): Product[] {
-  const maxWave = Number(process.env.MARKETING_MAX_WAVE ?? 1);
-  return PRODUCTS.filter((p) => p.wave <= maxWave);
+/** Products being promoted: wave ≤ maxWave (1 = Agent Reach only, the video's advice) and not paused by the optimiser. */
+export function activeProducts(s: Pick<GrowthSettings, 'maxWave' | 'paused'>): Product[] {
+  return PRODUCTS.filter((p) => p.wave <= s.maxWave && !s.paused.includes(p.slug));
+}
+
+/** Daily new-prospect budget per product from the optimiser's weights (equal split by default). */
+export function allocate(products: Product[], cap: number, weights: Record<string, number>): Record<string, number> {
+  const w = products.map((p) => weights[p.slug] ?? 1 / products.length);
+  const sum = w.reduce((a, b) => a + b, 0) || 1;
+  return Object.fromEntries(products.map((p, i) => [p.slug, Math.max(1, Math.round((cap * w[i]) / sum))]));
+}
+
+/** Picks a step-1 subject variant (uniform among active ones), seeding the default on first use. */
+async function pickVariant(product: Product): Promise<{ id: string; subject: string }> {
+  let active = await q<{ id: string; subject: string }>(`SELECT id, subject FROM sequence_variants WHERE product_slug=$1 AND step=1 AND status='active'`, [product.slug]);
+  if (active.length === 0) {
+    const subject = sequenceFor(product.slug)[0].subject;
+    active = await q(`INSERT INTO sequence_variants (product_slug, step, subject, source) VALUES ($1,1,$2,'default') RETURNING id, subject`, [product.slug, subject]);
+  }
+  return active[Math.floor(Math.random() * active.length)];
 }
 
 async function suppressed(email: string) {
@@ -43,12 +61,13 @@ async function suppressed(email: string) {
 }
 
 // ---------------- 1. prospects ----------------
-async function pullProspects(products: Product[], perProduct: number, clock: Clock, s: Stats) {
+async function pullProspects(products: Product[], budget: Record<string, number>, clock: Clock, s: Stats) {
   for (const p of products) {
     if (!clock.ok()) return;
     let found: Prospect[] = [];
     try {
-      found = await findProspects(p.slug, perProduct);
+      found = await findProspects(p.slug, Math.ceil(budget[p.slug] * 1.5)); // over-fetch: some get skipped for lack of proof
+      await recordCost('prospecting', found.length * Number(process.env.PROSPECT_COST_CENTS ?? 1), p.slug, { n: found.length });
     } catch (e: any) {
       err(s, `prospects ${p.slug}: ${e.message}`);
       continue;
@@ -96,7 +115,9 @@ async function gatherProof(products: Product[], clock: Clock, s: Stats) {
     for (const r of rows) {
       if (!clock.ok(60_000)) return;
       try {
-        const proof = await buildProof(p, { company: r.company ?? r.domain ?? 'your company', niche: r.niche, domain: r.domain });
+        const proof = await withCostContext({ product: p.slug, kind: 'marketing' }, () =>
+          buildProof(p, { company: r.company ?? r.domain ?? 'your company', niche: r.niche, domain: r.domain }),
+        );
         const real = proof.kind === 'threads' ? (proof as any).threads.length : 0;
         if (proof.kind === 'threads' && real < 2) {
           await q(`UPDATE prospects SET status='skipped', proof=$2 WHERE id=$1`, [r.id, proof]);
@@ -113,7 +134,7 @@ async function gatherProof(products: Product[], clock: Clock, s: Stats) {
 }
 
 // ---------------- 3. sequences ----------------
-export function renderSequence(product: Product, pr: any): { subject: string; body: string }[] {
+export function renderSequence(product: Product, pr: any, step1Subject?: string): { subject: string; body: string }[] {
   const proof = pr.proof ?? {};
   const threads: any[] = proof.kind === 'threads' ? proof.threads : [];
   const threadBlock = threads
@@ -136,8 +157,8 @@ export function renderSequence(product: Product, pr: any): { subject: string; bo
     senderTitle: config.MARKETING_SENDER_TITLE,
   };
   const foot = footer(config.MARKETING_POSTAL_ADDRESS ?? '{{postalAddress}}', unsubscribeUrl(pr.email));
-  return sequenceFor(product.slug).map((st) => {
-    const subject = fill(st.subject, vars);
+  return sequenceFor(product.slug).map((st, i) => {
+    const subject = fill(i === 0 && step1Subject ? step1Subject : st.subject, vars);
     const body = applyClaimsToggle(fill(st.body, vars), config.MARKETING_CLIENT_CLAIMS) + foot;
     assertFilled(subject);
     assertFilled(body);
@@ -145,15 +166,16 @@ export function renderSequence(product: Product, pr: any): { subject: string; bo
   });
 }
 
-async function enrolSequences(products: Product[], clock: Clock, s: Stats) {
+async function enrolSequences(products: Product[], allocation: Record<string, number>, clock: Clock, s: Stats) {
   if (!integrations().instantly) return;
-  let budget = config.MARKETING_DAILY_SEND_CAP;
   for (const p of products) {
     const campaign = campaignFor(p.slug);
     if (!campaign) continue;
+    let budget = allocation[p.slug] ?? 0;
     const rows = await q(`SELECT * FROM prospects WHERE product_slug=$1 AND status='proofed' ORDER BY created_at LIMIT $2`, [p.slug, budget]);
     for (const pr of rows) {
-      if (!clock.ok() || budget <= 0) return;
+      if (!clock.ok()) return;
+      if (budget <= 0) break;
       const reason = blockReason({
         email: pr.email,
         suppressed: await suppressed(pr.email),
@@ -167,9 +189,10 @@ async function enrolSequences(products: Product[], clock: Clock, s: Stats) {
         continue;
       }
       try {
-        const steps = renderSequence(p, pr);
+        const variant = await pickVariant(p);
+        const steps = renderSequence(p, pr, variant.subject);
         await pushToInstantly(campaign, { email: pr.email, firstName: pr.first_name, company: pr.company, steps });
-        await q(`UPDATE prospects SET status='sequencing', step=1 WHERE id=$1`, [pr.id]);
+        await q(`UPDATE prospects SET status='sequencing', step=1, enrolled_at=now(), variant_id=$2 WHERE id=$1`, [pr.id, variant.id]);
         budget--;
         bump(s, 'enrolled');
       } catch (e: any) {
@@ -187,6 +210,7 @@ async function ownedContent(products: Product[], clock: Clock, s: Stats) {
   for (const [i, p] of products.entries()) {
     if (!clock.ok(90_000)) return;
     try {
+      await withCostContext({ product: p.slug, kind: 'marketing' }, async () => {
       const post = await ask(
         `Write one social post for our own company page promoting "${p.name}" to ${p.audience}. Lead with a specific, useful insight about the problem (${p.hook}). One concrete tip they can use without buying. End with a soft CTA to ${config.PUBLIC_WEB_URL}/p/${p.slug}. No hashtags spam (max 2), no emojis, under 600 characters. Do not invent client results or statistics.`,
         `Day ${new Date().toISOString().slice(0, 10)}; vary the angle from previous days.`,
@@ -208,6 +232,7 @@ async function ownedContent(products: Product[], clock: Clock, s: Stats) {
         await q(`INSERT INTO content_posts (product_slug, channel, slug, title, body) VALUES ($1,'blog',$2,$3,$4)`, [p.slug, slug, art.title, art.markdown]);
         bump(s, 'blog_posts');
       }
+      });
     } catch (e: any) {
       err(s, `content ${p.slug}: ${e.message}`);
     }
@@ -241,14 +266,16 @@ export async function runMarketing(opts: { force?: boolean } = {}): Promise<Stat
   const run = (await one<{ id: string }>(`INSERT INTO marketing_runs DEFAULT VALUES RETURNING id`))!;
   const clock = new Clock(config.MARKETING_BUDGET_MINUTES);
   const s: Stats = {};
-  const products = activeProducts();
+  const settings = await getSettings(); // levers tuned weekly by the optimiser
+  const products = activeProducts(settings);
+  const allocation = allocate(products, settings.dailySendCap, settings.weights);
   s.products = products.map((p) => p.slug) as unknown as string[];
+  (s as any).allocation = allocation;
 
-  const perProduct = Math.max(3, Math.ceil(config.MARKETING_DAILY_SEND_CAP / products.length));
   const phases: [string, () => Promise<void>][] = [
-    ['prospects', () => pullProspects(products, perProduct, clock, s)],
+    ['prospects', () => pullProspects(products, allocation, clock, s)],
     ['proof', () => gatherProof(products, clock, s)],
-    ['sequences', () => enrolSequences(products, clock, s)],
+    ['sequences', () => enrolSequences(products, allocation, clock, s)],
     ['content', () => ownedContent(products, clock, s)],
   ];
   for (const [name, fn] of phases) {

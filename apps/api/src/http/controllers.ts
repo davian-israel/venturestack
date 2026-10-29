@@ -32,8 +32,18 @@ export class PublicController {
   }
 
   @Post('checkout/:slug')
-  checkout(@Param('slug') slug: string, @Body() body: { email?: string; oneOff?: boolean }) {
-    return this.billing.createCheckout(slug, { email: body?.email, oneOff: !!body?.oneOff });
+  checkout(@Param('slug') slug: string, @Body() body: { email?: string; oneOff?: boolean; ref?: string; source?: string }) {
+    return this.billing.createCheckout(slug, { email: body?.email, oneOff: !!body?.oneOff, ref: body?.ref, source: body?.source });
+  }
+
+  /** Lightweight first-party analytics (no cookies, no personal data). */
+  @Post('t')
+  @HttpCode(204)
+  async track(@Body() body: { type?: string; product?: string; ref?: string; source?: string }) {
+    if (body?.type !== 'page_view') return;
+    const product = body.product && bySlug(body.product) ? body.product : null;
+    const clean = (v?: string) => (v && /^[\w.-]{1,40}$/.test(v) ? v : null);
+    await q(`INSERT INTO funnel_events (type, product_slug, ref, source) VALUES ('page_view',$1,$2,$3)`, [product, clean(body.ref), clean(body.source)]);
   }
 
   @Post('billing/webhook')
@@ -68,6 +78,7 @@ export class PublicController {
   async proof(@Param('slug') slug: string) {
     const p = await one<{ company: string; product_slug: string; proof: any }>('SELECT company, product_slug, proof FROM prospects WHERE proof_slug=$1', [slug]);
     if (!p) throw new NotFoundException();
+    await q(`INSERT INTO funnel_events (type, product_slug, ref, source) VALUES ('proof_view',$1,$2,'email')`, [p.product_slug, slug]);
     return { company: p.company, product: bySlug(p.product_slug), proof: p.proof };
   }
 
@@ -82,11 +93,21 @@ export class PublicController {
   /** Instantly webhook: replies / unsubscribes / bounces stop the sequence immediately. */
   @Post('webhooks/instantly')
   @HttpCode(200)
-  async instantly(@Body() body: { event_type?: string; lead_email?: string; email?: string }, @Query('key') key?: string) {
+  async instantly(@Body() body: { event_type?: string; lead_email?: string; email?: string; step?: number }, @Query('key') key?: string) {
     if (!config.INSTANTLY_API_KEY || key !== unsubSig('instantly-webhook')) throw new ForbiddenException();
     const email = (body.lead_email ?? body.email ?? '').toLowerCase();
     if (!email) return { ok: true };
     const ev = body.event_type ?? '';
+    const kind = /reply/.test(ev) ? 'replied' : /open/.test(ev) ? 'opened' : /click/.test(ev) ? 'clicked' : /bounce/.test(ev) ? 'bounced'
+      : /unsub/.test(ev) ? 'unsubscribed' : /sent/.test(ev) ? 'sent' : null;
+    if (kind) {
+      await q(
+        `INSERT INTO campaign_events (email, product_slug, event, step, variant_id)
+         SELECT $1, p.product_slug, $2, $3, p.variant_id FROM (SELECT 1) x
+         LEFT JOIN LATERAL (SELECT product_slug, variant_id FROM prospects WHERE email=$1 ORDER BY enrolled_at DESC NULLS LAST LIMIT 1) p ON true`,
+        [email, kind, Number((body as any).step) || null],
+      );
+    }
     if (/reply/.test(ev)) await q(`UPDATE prospects SET status='replied' WHERE email=$1`, [email]);
     if (/unsub|bounce|complain/.test(ev)) {
       await q(`INSERT INTO suppression (email, reason) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [email, ev]);

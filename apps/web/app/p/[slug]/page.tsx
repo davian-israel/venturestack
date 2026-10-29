@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { PRODUCTS, bySlug, usd } from '@vs/catalog';
 import BuyButton from './BuyButton';
+import Tracker from './Tracker';
 
 export function generateStaticParams() {
   return PRODUCTS.map((p) => ({ slug: p.slug }));
@@ -17,6 +18,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
   const cancelled = (await searchParams).cancelled;
   return (
     <>
+      <Tracker product={p.slug} />
       <h1>{p.name}</h1>
       <p className="lead">{p.tagline}</p>
       {cancelled && <p className="notice">Checkout cancelled — nothing was charged.</p>}

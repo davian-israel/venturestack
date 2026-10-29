@@ -5,7 +5,8 @@ import { apiGet } from '@/lib/api';
 export const metadata = { robots: { index: false } };
 
 export default async function Proof({ params }: { params: Promise<{ id: string }> }) {
-  const data = await apiGet<{ company: string; product: any; proof: any }>(`/proof/${(await params).id}`);
+  const id = (await params).id;
+  const data = await apiGet<{ company: string; product: any; proof: any }>(`/proof/${id}`, { fresh: true }); // fresh: each visit is counted
   if (!data) notFound();
   const { company, product, proof } = data;
   return (
@@ -34,7 +35,7 @@ export default async function Proof({ params }: { params: Promise<{ id: string }
           <p className="muted">This is a sample built from public information; your real version is tailored after a 2-minute setup.</p>
         </>
       )}
-      <p style={{ marginTop: 28 }}><a className="btn" href={`/p/${product.slug}`}>Get this every {product.slug === 'agent-reach' ? 'morning' : 'month'} — {usd(product.monthlyCents)}/mo</a></p>
+      <p style={{ marginTop: 28 }}><a className="btn" href={`/p/${product.slug}?ref=${id}&utm_source=email`}>Get this every {product.slug === 'agent-reach' ? 'morning' : 'month'} — {usd(product.monthlyCents)}/mo</a></p>
     </>
   );
 }

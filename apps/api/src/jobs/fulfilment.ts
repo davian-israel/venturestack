@@ -8,6 +8,9 @@ import { handlerFor, HANDLERS } from '../products/registry';
 import { provision, suspend } from '../provisioning/provisioning';
 import { openAll } from '../security/secrets';
 import { fulfilQueue, FulfilJob } from './queue';
+import { withCostContext } from '../growth/costs';
+import { snapshotMrr } from '../growth/metrics';
+import { runOptimiser } from '../growth/optimiser';
 
 /** Onboarding is complete when required fields are filled and the product's consent gate is signed. */
 export function onboardingComplete(slug: string, cfg: Record<string, any>, consentAt: Date | null): boolean {
@@ -30,7 +33,11 @@ export async function processJob(job: FulfilJob): Promise<unknown> {
     case 'suspend':
       return suspend(job.tenantId, job.productSlug);
     case 'run':
-      return runProduct(job.tenantId, job.productSlug);
+      return withCostContext({ product: job.productSlug, kind: 'delivery' }, () => runProduct(job.tenantId, job.productSlug));
+    case 'snapshot':
+      return snapshotMrr();
+    case 'optimise':
+      return runOptimiser();
     case 'schedule-all':
       return syncSchedules();
   }

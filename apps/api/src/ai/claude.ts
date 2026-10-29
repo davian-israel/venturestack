@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config';
+import { recordAiUsage } from '../growth/costs';
 
 let client: Anthropic | undefined;
 
@@ -17,6 +18,7 @@ export async function ask(system: string, user: string, maxTokens = 1500): Promi
     system,
     messages: [{ role: 'user', content: user }],
   });
+  await recordAiUsage(msg.usage?.input_tokens ?? 0, msg.usage?.output_tokens ?? 0);
   return msg.content
     .filter((b) => b.type === 'text')
     .map((b) => (b as { text: string }).text)

@@ -6,7 +6,9 @@ export type FulfilJob =
   | { type: 'suspend'; tenantId: string; productSlug: string }
   | { type: 'welcome'; tenantId: string; productSlug: string }
   | { type: 'run'; tenantId: string; productSlug: string }
-  | { type: 'schedule-all' };
+  | { type: 'schedule-all' }
+  | { type: 'snapshot' }
+  | { type: 'optimise' };
 
 export const FULFIL_QUEUE = 'fulfil';
 

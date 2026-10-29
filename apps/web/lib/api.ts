@@ -1,9 +1,9 @@
 export const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 /** Server-side fetch to the API (public endpoints). */
-export async function apiGet<T>(path: string): Promise<T | null> {
+export async function apiGet<T>(path: string, opts: { fresh?: boolean } = {}): Promise<T | null> {
   try {
-    const res = await fetch(`${process.env.API_INTERNAL_URL ?? API}${path}`, { next: { revalidate: 300 } });
+    const res = await fetch(`${process.env.API_INTERNAL_URL ?? API}${path}`, opts.fresh ? { cache: 'no-store' } : { next: { revalidate: 300 } });
     return res.ok ? ((await res.json()) as T) : null;
   } catch {
     return null;
