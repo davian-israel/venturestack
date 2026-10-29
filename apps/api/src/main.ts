@@ -22,6 +22,10 @@ async function bootstrap() {
   // Railway private networking is IPv6; fall back to IPv4 where IPv6 is unavailable.
   await app.listen(config.PORT, '::').catch(() => app.listen(config.PORT, '0.0.0.0'));
   console.log(`api listening on ${config.PORT}`);
+  if (process.env.RUN_WORKER === 'true') {
+    const { startWorker } = await import('./worker');
+    await startWorker();
+  }
 }
 
 bootstrap().catch((e) => {

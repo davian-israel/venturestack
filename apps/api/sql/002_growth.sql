@@ -91,3 +91,10 @@ CREATE TABLE IF NOT EXISTS optimiser_log (
   detail       JSONB,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Server-generated secrets (JWT signing, field encryption) so they never need to be typed or shared.
+CREATE TABLE IF NOT EXISTS app_secrets (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

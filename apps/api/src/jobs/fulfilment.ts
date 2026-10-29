@@ -11,6 +11,7 @@ import { fulfilQueue, FulfilJob } from './queue';
 import { withCostContext } from '../growth/costs';
 import { snapshotMrr } from '../growth/metrics';
 import { runOptimiser } from '../growth/optimiser';
+import { runMarketing } from '../marketing/runner';
 
 /** Onboarding is complete when required fields are filled and the product's consent gate is signed. */
 export function onboardingComplete(slug: string, cfg: Record<string, any>, consentAt: Date | null): boolean {
@@ -38,6 +39,12 @@ export async function processJob(job: FulfilJob): Promise<unknown> {
       return snapshotMrr();
     case 'optimise':
       return runOptimiser();
+    case 'marketing':
+      // Hard 60-minute budget even when run inside the worker instead of a Railway cron service.
+      return Promise.race([
+        runMarketing(),
+        new Promise((resolve) => setTimeout(() => resolve({ stopped: 'budget reached' }), config.MARKETING_BUDGET_MINUTES * 60_000).unref()),
+      ]);
     case 'schedule-all':
       return syncSchedules();
   }

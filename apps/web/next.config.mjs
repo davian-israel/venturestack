@@ -1,2 +1,2 @@
 /** @type {import('next').NextConfig} */
-export default { output: 'standalone', transpilePackages: ['@vs/catalog'] };
+export default { transpilePackages: ['@vs/catalog'] };

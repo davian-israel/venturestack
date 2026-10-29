@@ -8,7 +8,8 @@ export type FulfilJob =
   | { type: 'run'; tenantId: string; productSlug: string }
   | { type: 'schedule-all' }
   | { type: 'snapshot' }
-  | { type: 'optimise' };
+  | { type: 'optimise' }
+  | { type: 'marketing' };
 
 export const FULFIL_QUEUE = 'fulfil';
 
